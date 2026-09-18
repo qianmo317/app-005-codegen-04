@@ -15,7 +15,10 @@ import type {
   Review,
   Attendance,
   Commission,
-  WaitList
+  WaitList,
+  CapacityRule,
+  LeaveRequest,
+  RescheduleRecord
 } from '../types';
 import {
   mockCustomers,
@@ -51,6 +54,9 @@ interface AppState {
   attendance: Attendance[];
   commissions: Commission[];
   waitList: WaitList[];
+  capacityRules: CapacityRule[];
+  leaveRequests: LeaveRequest[];
+  rescheduleRecords: RescheduleRecord[];
   initialized: boolean;
 }
 
@@ -66,7 +72,13 @@ const loadState = (): AppState => {
         const b64 = firstCustomer.avatar.replace('data:image/svg+xml;base64,', '');
         try {
           atob(b64);
-          return saved;
+          // 兼容旧版本数据：补齐后加的字段
+          return {
+            ...saved,
+            capacityRules: saved.capacityRules ?? [],
+            leaveRequests: saved.leaveRequests ?? [],
+            rescheduleRecords: saved.rescheduleRecords ?? []
+          };
         } catch (e) {
           console.log('Detected corrupted data, regenerating...');
           storage.clear();
@@ -101,6 +113,9 @@ const loadState = (): AppState => {
     attendance: mockAttendance(employeeIds),
     commissions: mockCommissions(employeeIds),
     waitList: mockWaitList(customerIds, serviceIds),
+    capacityRules: [],
+    leaveRequests: [],
+    rescheduleRecords: [],
     initialized: true
   };
 };
@@ -237,6 +252,36 @@ const appSlice = createSlice({
         else if (membership.totalSpent > 5000) membership.level = 'silver';
       }
       saveState(state);
+    },
+    upsertCapacityRule: (state, action: PayloadAction<CapacityRule>) => {
+      const index = state.capacityRules.findIndex(
+        r => r.dayOfWeek === action.payload.dayOfWeek && r.hour === action.payload.hour
+      );
+      if (index !== -1) {
+        state.capacityRules[index] = action.payload;
+      } else {
+        state.capacityRules.push(action.payload);
+      }
+      saveState(state);
+    },
+    addLeaveRequest: (state, action: PayloadAction<LeaveRequest>) => {
+      state.leaveRequests.unshift(action.payload);
+      saveState(state);
+    },
+    deleteLeaveRequest: (state, action: PayloadAction<string>) => {
+      state.leaveRequests = state.leaveRequests.filter(l => l.id !== action.payload);
+      saveState(state);
+    },
+    addRescheduleRecord: (state, action: PayloadAction<RescheduleRecord>) => {
+      state.rescheduleRecords.unshift(action.payload);
+      saveState(state);
+    },
+    updateRescheduleRecord: (state, action: PayloadAction<RescheduleRecord>) => {
+      const index = state.rescheduleRecords.findIndex(r => r.id === action.payload.id);
+      if (index !== -1) {
+        state.rescheduleRecords[index] = action.payload;
+        saveState(state);
+      }
     }
   }
 });
@@ -263,7 +308,12 @@ export const {
   addWaitList,
   updateWaitList,
   deleteWaitList,
-  addServiceRecord
+  addServiceRecord,
+  upsertCapacityRule,
+  addLeaveRequest,
+  deleteLeaveRequest,
+  addRescheduleRecord,
+  updateRescheduleRecord
 } = appSlice.actions;
 
 export const store = configureStore({

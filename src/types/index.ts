@@ -108,6 +108,34 @@ export interface WaitList {
   status: 'waiting' | 'notified' | 'cancelled' | 'booked';
 }
 
+export interface CapacityRule {
+  id: string;
+  dayOfWeek: number; // 0=周日 1=周一 ... 6=周六
+  hour: number; // 时段开始小时，如 9 表示 09:00-10:00
+  maxCustomers: number; // 该时段最多接待客人数
+  requiredStaff: number; // 该时段需要的在岗美容师人数
+}
+
+export interface LeaveRequest {
+  id: string;
+  employeeId: string;
+  date: string; // YYYY-MM-DD
+  reason: string;
+  createdAt: string;
+}
+
+export interface RescheduleRecord {
+  id: string;
+  appointmentId: string;
+  customerId: string;
+  fromTime: string; // 原开始时间 ISO
+  toTime: string; // 新开始时间 ISO
+  reason: string; // 挪时间的原因
+  notified: boolean; // 是否已通知顾客
+  notifiedAt?: string;
+  createdAt: string;
+}
+
 export interface Employee {
   id: string;
   name: string;

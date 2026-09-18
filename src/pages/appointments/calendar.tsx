@@ -206,6 +206,9 @@ const AppointmentCalendar: React.FC = () => {
                 const customer = state.customers.find((c) => c.id === appointment.customerId);
                 const service = state.services.find((s) => s.id === appointment.serviceId);
                 const employee = state.employees.find((e) => e.id === appointment.employeeId);
+                const reschedCount = state.rescheduleRecords.filter(
+                  (r) => r.customerId === appointment.customerId
+                ).length;
 
                 return (
                   <div
@@ -217,7 +220,14 @@ const AppointmentCalendar: React.FC = () => {
                         <Space>
                           <Avatar size={32} src={customer?.avatar} icon={<UserOutlined />} />
                           <div>
-                            <div style={{ fontWeight: 500 }}>{customer?.name}</div>
+                            <div style={{ fontWeight: 500 }}>
+                              {customer?.name}
+                              {reschedCount > 0 && (
+                                <Tag color="purple" style={{ marginLeft: 6 }}>
+                                  改约{reschedCount}次
+                                </Tag>
+                              )}
+                            </div>
                             <div style={{ fontSize: 12, color: '#8c8c8c' }}>
                               {service?.name} · {employee?.name}
                             </div>

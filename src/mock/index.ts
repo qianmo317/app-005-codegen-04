@@ -225,8 +225,14 @@ export const mockAppointments = (
 
   for (let i = 0; i < 150; i++) {
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - Random.integer(1, 30));
-    startDate.setHours(Random.integer(9, 20), Random.integer(0, 59));
+    if (i < 15) {
+      // 一部分预约落在今明两天，便于演示当日时段核对
+      startDate.setDate(startDate.getDate() + Random.integer(0, 1));
+      startDate.setHours(Random.integer(9, 19), [0, 15, 30, 45][Random.integer(0, 3)], 0, 0);
+    } else {
+      startDate.setDate(startDate.getDate() - Random.integer(-7, 30));
+      startDate.setHours(Random.integer(9, 20), Random.integer(0, 59));
+    }
 
     const duration = [30, 45, 60, 75, 90, 120][Random.integer(0, 5)];
     const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
@@ -239,7 +245,7 @@ export const mockAppointments = (
       startTime: startDate.toISOString(),
       endTime: endDate.toISOString(),
       duration,
-      status: statuses[Random.integer(0, 4)],
+      status: i < 15 ? 'confirmed' : statuses[Random.integer(0, 4)],
       source: sources[Random.integer(0, 3)],
       notes: Random.cparagraph(1),
       reminderSent: Math.random() > 0.3
