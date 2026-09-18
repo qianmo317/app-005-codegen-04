@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Row,
   Col,
@@ -15,7 +15,8 @@ import {
   List,
   Avatar,
   Tooltip,
-  Input
+  Input,
+  Alert
 } from 'antd';
 import {
   PlusOutlined,
@@ -23,28 +24,60 @@ import {
   ClockCircleOutlined,
   DeleteOutlined,
   CheckCircleOutlined,
-  UserOutlined
+  UserOutlined,
+  FieldTimeOutlined,
+  WarningOutlined
 } from '@ant-design/icons';
 import Calendar from 'react-calendar';
 import { useSelector, useDispatch } from 'react-redux';
+import { useNavigate, useLocation } from 'react-router-dom';
 import type { RootState } from '../../store';
 import { addAppointment, updateAppointment, deleteAppointment, addWaitList } from '../../store';
 import type { Appointment, WaitList } from '../../types';
 import { formatDate, formatTime, formatCurrency, generateId, getStatusText, getStatusColor } from '../../utils/format';
+import {
+  analyzeDayCapacity,
+  checkBooking,
+  getAppointmentRescheduleCount,
+  getCustomerRescheduleCount,
+} from '../../utils/capacity';
 import dayjs from 'dayjs';
 
 const AppointmentCalendar: React.FC = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const location = useLocation();
   const state = useSelector((state: RootState) => state.app);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    const dateParam = (location.state as { date?: string } | null)?.date;
+    if (dateParam) {
+      setSelectedDate(dayjs(dateParam).toDate());
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   const selectedDateStr = dayjs(selectedDate).format('YYYY-MM-DD');
 
   const dayAppointments = state.appointments
     .filter((a) => a.startTime.split('T')[0] === selectedDateStr)
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+  const capacityContext = {
+    appointments: state.appointments,
+    rules: state.capacityRules,
+    employees: state.employees,
+    schedules: state.schedules,
+    leaves: state.leaveRecords,
+  };
+
+  // 当天逐小时容量对账结果，用于顶部预警
+  const dayCapacity = analyzeDayCapacity({ date: selectedDateStr, ...capacityContext });
+  const dayOverbookedCount = dayCapacity.overbookedSlots.reduce((sum, s) => sum + s.overbooked, 0);
+  const dayMoveCount = dayCapacity.appointmentsToMove.length;
 
   const waitListItems = state.waitList.filter((w) => w.status === 'waiting');
 
@@ -129,9 +162,38 @@ const AppointmentCalendar: React.FC = () => {
         return;
       }
 
-      dispatch(addAppointment(newAppointment));
-      message.success('预约成功');
-      setIsModalOpen(false);
+      // 对店里设定的每小时容量上限：排满/超员、美容师正在请假时提前预警
+      const bookingCheck = checkBooking(
+        startTime.format('YYYY-MM-DD'),
+        startTime.hour() * 60 + startTime.minute(),
+        duration,
+        values.employeeId,
+        capacityContext
+      );
+
+      const doAdd = () => {
+        dispatch(addAppointment(newAppointment));
+        message.success('预约成功');
+        setIsModalOpen(false);
+      };
+
+      if (bookingCheck.slotOverbooked || bookingCheck.employeeOnLeave) {
+        Modal.confirm({
+          title: '容量预警',
+          icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+          content: `该时段${
+            bookingCheck.slotOverbooked ? '已达到每小时接待上限，排上去会超出容量' : ''
+          }${bookingCheck.slotOverbooked && bookingCheck.employeeOnLeave ? '；' : ''}${
+            bookingCheck.employeeOnLeave ? '所选美容师该时段正在请假' : ''
+          }。仍要排入吗？（排入后可在「接客容量」中挪动）`,
+          okText: '仍然排入',
+          cancelText: '取消',
+          onOk: doAdd,
+        });
+        return;
+      }
+
+      doAdd();
     } catch {
       // validation error
     }
@@ -176,10 +238,58 @@ const AppointmentCalendar: React.FC = () => {
             {formatDate(selectedDate)} 预约管理
           </p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          新增预约
-        </Button>
+        <Space>
+          <Button
+            icon={<FieldTimeOutlined />}
+            onClick={() =>
+              navigate('/capacity', { state: { date: selectedDateStr } })
+            }
+          >
+            接客容量对账
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+            新增预约
+          </Button>
+        </Space>
       </div>
+
+      {(dayOverbookedCount > 0 || dayMoveCount > 0 || dayCapacity.shortageSlots.length > 0) && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          type={dayOverbookedCount > 0 ? 'error' : 'warning'}
+          showIcon
+          icon={<WarningOutlined />}
+          message={
+            dayOverbookedCount > 0
+              ? `当天有 ${dayCapacity.overbookedSlots.length} 个时段排超，共多排 ${dayOverbookedCount} 单，${dayMoveCount} 单需要挪动`
+              : `当天有 ${dayCapacity.shortageSlots.length} 个人手不足时段，${dayMoveCount} 单需要挪动`
+          }
+          description={
+            <Space direction="vertical" size={2}>
+              {dayCapacity.overbookedSlots.map((s) => (
+                <span key={s.slot.startTime}>
+                  · {s.slot.startTime}-{s.slot.endTime} 上限 {s.rule.maxBookings} 位，已排 {s.booked} 单，多排{' '}
+                  {s.overbooked} 单
+                </span>
+              ))}
+              {dayCapacity.shortageSlots.map((s) => (
+                <span key={s.slot.startTime} style={{ color: '#ad6800' }}>
+                  · {s.slot.startTime}-{s.slot.endTime} 需 {s.rule.requiredStaff} 位美容师，实际在岗 {s.staffOnDuty}{' '}
+                  位，缺 {s.staffShortage} 人
+                </span>
+              ))}
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0 }}
+                onClick={() => navigate('/capacity', { state: { date: selectedDateStr } })}
+              >
+                前往接客容量处理 →
+              </Button>
+            </Space>
+          }
+        />
+      )}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={10}>
@@ -206,18 +316,38 @@ const AppointmentCalendar: React.FC = () => {
                 const customer = state.customers.find((c) => c.id === appointment.customerId);
                 const service = state.services.find((s) => s.id === appointment.serviceId);
                 const employee = state.employees.find((e) => e.id === appointment.employeeId);
+                const rescheduleTotal = getCustomerRescheduleCount(
+                  state.notifications,
+                  appointment.customerId
+                );
+                const thisAppMoved = getAppointmentRescheduleCount(
+                  state.notifications,
+                  appointment.id
+                );
+                const needMove = dayCapacity.appointmentsToMove.some(
+                  (m) => m.appointment.id === appointment.id
+                );
 
                 return (
                   <div
                     key={appointment.id}
-                    className={`appointment-slot ${appointment.status}`}
+                    className={`appointment-slot ${appointment.status} ${needMove ? 'need-move' : ''}`}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1 }}>
                         <Space>
                           <Avatar size={32} src={customer?.avatar} icon={<UserOutlined />} />
                           <div>
-                            <div style={{ fontWeight: 500 }}>{customer?.name}</div>
+                            <div style={{ fontWeight: 500 }}>
+                              {customer?.name}
+                              {rescheduleTotal > 0 && (
+                                <Tooltip title={`${customer?.name} 累计被改约 ${rescheduleTotal} 次`}>
+                                  <Tag color="purple" style={{ marginLeft: 6 }}>
+                                    累计挪 {rescheduleTotal} 次
+                                  </Tag>
+                                </Tooltip>
+                              )}
+                            </div>
                             <div style={{ fontSize: 12, color: '#8c8c8c' }}>
                               {service?.name} · {employee?.name}
                             </div>
@@ -231,9 +361,13 @@ const AppointmentCalendar: React.FC = () => {
                             {formatTime(appointment.startTime)}
                           </span>
                         </Space>
-                        <Tag color={getStatusColor(appointment.status)}>
-                          {getStatusText(appointment.status)}
-                        </Tag>
+                        <Space size={4}>
+                          {thisAppMoved > 0 && <Tag color="geekblue">本单已挪 {thisAppMoved} 次</Tag>}
+                          {needMove && <Tag color="red" icon={<WarningOutlined />}>需挪单</Tag>}
+                          <Tag color={getStatusColor(appointment.status)}>
+                            {getStatusText(appointment.status)}
+                          </Tag>
+                        </Space>
                       </Space>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>

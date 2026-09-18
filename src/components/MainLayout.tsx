@@ -9,7 +9,8 @@ import {
   UserOutlined,
   LogoutOutlined,
   SettingOutlined,
-  BellOutlined
+  BellOutlined,
+  FieldTimeOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -43,6 +44,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       key: '/appointments',
       icon: <CalendarOutlined />,
       label: '预约排期',
+    },
+    {
+      key: '/capacity',
+      icon: <FieldTimeOutlined />,
+      label: '接客容量',
     },
     {
       key: '/schedules',

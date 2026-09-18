@@ -276,6 +276,12 @@ body {
     border-color: @error-color;
     background: rgba(255, 77, 79, 0.06);
   }
+
+  &.need-move {
+    border-color: @error-color;
+    border-width: 4px;
+    box-shadow: 0 0 0 1px rgba(255, 77, 79, 0.25);
+  }
 }
 
 .timeline-item {
@@ -325,6 +331,79 @@ body {
   text-align: center;
   padding: 48px 0;
   color: @text-secondary-color;
+}
+
+// ===== 接客容量对账 =====
+.capacity-row-danger > td {
+  background: rgba(255, 77, 79, 0.08) !important;
+}
+
+.capacity-row-warning > td {
+  background: rgba(250, 173, 20, 0.08) !important;
+}
+
+.capacity-row-full > td {
+  background: rgba(250, 173, 20, 0.04) !important;
+}
+
+.rule-edit-list {
+  max-height: 380px;
+  overflow-y: auto;
+  border: 1px solid @border-color;
+  border-radius: 8px;
+}
+
+.rule-edit-head,
+.rule-edit-row {
+  display: grid;
+  grid-template-columns: 1fr 88px 88px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.rule-edit-head {
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  font-weight: 600;
+  z-index: 1;
+}
+
+.rule-edit-row {
+  border-top: 1px solid @border-color;
+}
+
+.move-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 77, 79, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 77, 79, 0.04);
+}
+
+.leave-item {
+  padding: 8px 10px;
+  border: 1px solid rgba(250, 173, 20, 0.25);
+  border-radius: 8px;
+  background: rgba(250, 173, 20, 0.04);
+}
+
+.notif-item {
+  padding: 8px 10px;
+  border: 1px solid @border-color;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: @primary-color;
+    background: rgba(201, 168, 108, 0.05);
+  }
 }
 
 .ant-btn-primary {

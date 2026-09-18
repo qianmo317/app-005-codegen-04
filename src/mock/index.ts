@@ -1,4 +1,12 @@
 import Mock from 'mockjs';
+import type {
+  Appointment,
+  CapacityRule,
+  LeaveRecord,
+  RescheduleNotification,
+} from '../types';
+import dayjs from 'dayjs';
+import { buildDefaultRules } from '../utils/capacity';
 
 const Random = Mock.Random;
 
@@ -416,4 +424,205 @@ export const mockWaitList = (customerIds: string[], serviceIds: string[]) => {
     });
   }
   return waitList;
+};
+
+export const mockCapacityRules = (): CapacityRule[] => buildDefaultRules();
+
+/**
+ * 演示用：覆盖今天/明天部分员工的排班（轮休、早班），
+ * 配合临时请假让高峰时段出现人手缺口。
+ */
+export const mockDemoScheduleOverrides = (): Array<{
+  id: string;
+  employeeId: string;
+  date: string;
+  shiftType: 'morning' | 'afternoon' | 'full_day' | 'off';
+  startTime: string;
+  endTime: string;
+}> => {
+  const today = dayjs().format('YYYY-MM-DD');
+  const tomorrow = dayjs().add(1, 'day').format('YYYY-MM-DD');
+  return [
+    // 今天：张美容早班（11 点下班 → 11 点后少 1 人）、陈美容轮休
+    { id: 'SC-DEMO-1', employeeId: 'E001', date: today, shiftType: 'morning', startTime: '09:00', endTime: '11:00' },
+    { id: 'SC-DEMO-2', employeeId: 'E006', date: today, shiftType: 'off', startTime: '--', endTime: '--' },
+    // 明天：吴美容轮休，配合刘技师请假放大缺人
+    { id: 'SC-DEMO-3', employeeId: 'E009', date: tomorrow, shiftType: 'off', startTime: '--', endTime: '--' },
+  ];
+};
+
+/**
+ * 未来 7 天的演示预约：今天故意排出超员时段，
+ * 并把部分单挂在临时请假的美容师名下，用于演示对账与挪单。
+ */
+export const mockFutureAppointments = (
+  customerIds: string[],
+  serviceIds: string[],
+  employeeIds: string[]
+): Appointment[] => {
+  const list: Appointment[] = [];
+  let seq = 1;
+  const mk = (
+    dayOffset: number,
+    hour: number,
+    minute: number,
+    duration: number,
+    customerIdx: number,
+    serviceId: string,
+    employeeId: string,
+    status: Appointment['status'] = 'confirmed'
+  ): Appointment => {
+    const start = dayjs().add(dayOffset, 'day').hour(hour).minute(minute).second(0).millisecond(0);
+    return {
+      id: `AF${String(seq++).padStart(6, '0')}`,
+      customerId: customerIds[customerIdx % customerIds.length],
+      serviceId,
+      employeeId,
+      startTime: start.toISOString(),
+      endTime: start.add(duration, 'minute').toISOString(),
+      duration,
+      status,
+      source: (['phone', 'wechat', 'walk_in', 'online'] as const)[seq % 4],
+      notes: '',
+      reminderSent: false,
+    };
+  };
+
+  // ===== 今天：10:00 / 11:00 时段容量 6 各排 7 单（各多排 1 单），李美容/赵美容请假 =====
+  // 10:00（7 单，多排 1 单；其中两单挂在请假美容师名下）
+  mk(0, 10, 0, 60, 0, 'S001', 'E001');
+  mk(0, 10, 0, 60, 1, 'S002', 'E002'); // 李美容全天请假 → 需挪
+  mk(0, 10, 0, 60, 2, 'S002', 'E009');
+  mk(0, 10, 0, 60, 3, 'S001', 'E005');
+  mk(0, 10, 0, 60, 4, 'S005', 'E004'); // 赵美容上午请假 → 需挪
+  mk(0, 10, 0, 60, 5, 'S003', 'E003');
+  mk(0, 10, 0, 60, 6, 'S007', 'E010'); // 第 7 单 → 10:00 时段多排 1 单
+  // 11:00（7 单，多排 1 单）
+  mk(0, 11, 0, 60, 7, 'S001', 'E010');
+  mk(0, 11, 0, 60, 8, 'S020', 'E001'); // 张美容 11 点下班
+  mk(0, 11, 0, 60, 9, 'S003', 'E009');
+  mk(0, 11, 0, 60, 10, 'S008', 'E005');
+  mk(0, 11, 0, 60, 11, 'S019', 'E003');
+  mk(0, 11, 0, 60, 12, 'S002', 'E009');
+  mk(0, 11, 0, 60, 24, 'S007', 'E010'); // 第 7 单 → 11:00 时段多排 1 单
+  // 12:00 / 13:00（普通时段）
+  mk(0, 12, 0, 60, 25, 'S020', 'E001');
+  mk(0, 12, 0, 60, 26, 'S015', 'E010');
+  mk(0, 13, 0, 60, 27, 'S001', 'E009');
+  mk(0, 13, 0, 60, 28, 'S015', 'E003');
+  // 14:00（正好满 6 单，不超员，用来对比展示）
+  mk(0, 14, 0, 60, 13, 'S005', 'E001');
+  mk(0, 14, 0, 60, 14, 'S003', 'E003');
+  mk(0, 14, 0, 60, 15, 'S001', 'E005');
+  mk(0, 14, 0, 60, 16, 'S007', 'E010');
+  mk(0, 14, 0, 60, 17, 'S020', 'E009');
+  mk(0, 14, 0, 60, 18, 'S002', 'E010');
+  // 15:00 / 16:00（平峰，不超员）
+  mk(0, 15, 0, 60, 19, 'S008', 'E005');
+  mk(0, 15, 0, 60, 20, 'S013', 'E009');
+  mk(0, 16, 0, 60, 29, 'S010', 'E010');
+  mk(0, 16, 0, 60, 30, 'S019', 'E009');
+  // 19:00 / 20:00
+  mk(0, 19, 0, 60, 21, 'S004', 'E003');
+  mk(0, 19, 0, 60, 22, 'S017', 'E010');
+  mk(0, 19, 0, 60, 23, 'S001', 'E009');
+  mk(0, 20, 0, 60, 31, 'S020', 'E003');
+
+  // ===== 明天 ~ 未来 6 天：随机散单 =====
+  for (let d = 1; d <= 6; d++) {
+    const count = Random.integer(6, 14);
+    for (let i = 0; i < count; i++) {
+      const hour = Random.integer(9, 19);
+      const minute = [0, 15, 30, 45][Random.integer(0, 3)];
+      const duration = [30, 45, 60, 75, 90][Random.integer(0, 4)];
+      list.push(
+        mk(
+          d,
+          hour,
+          minute,
+          duration,
+          Random.integer(0, customerIds.length - 1),
+          serviceIds[Random.integer(0, serviceIds.length - 1)],
+          employeeIds[Random.integer(0, employeeIds.length - 1)]
+        )
+      );
+    }
+  }
+
+  return list;
+};
+
+/** 临时请假演示数据：今天李美容/赵美容请假，明天刘技师请假 */
+export const mockLeaveRecords = (): LeaveRecord[] => {
+  const today = dayjs().format('YYYY-MM-DD');
+  const tomorrow = dayjs().add(1, 'day').format('YYYY-MM-DD');
+  return [
+    {
+      id: 'LV000001',
+      employeeId: 'E002',
+      date: today,
+      startTime: '09:00',
+      endTime: '21:00',
+      reason: '家中临时有事，请假一天',
+      type: 'full_day',
+      createdAt: dayjs().subtract(1, 'day').toISOString(),
+      cancelled: false,
+    },
+    {
+      id: 'LV000002',
+      employeeId: 'E004',
+      date: today,
+      startTime: '09:00',
+      endTime: '14:00',
+      reason: '上午身体不适去医院',
+      type: 'partial',
+      createdAt: dayjs().subtract(1, 'day').toISOString(),
+      cancelled: false,
+    },
+    {
+      id: 'LV000003',
+      employeeId: 'E005',
+      date: tomorrow,
+      startTime: '09:00',
+      endTime: '21:00',
+      reason: '参加培训，请假一天',
+      type: 'full_day',
+      createdAt: dayjs().subtract(2, 'hour').toISOString(),
+      cancelled: false,
+    },
+  ];
+};
+
+/** 改约通知演示数据：让部分顾客有 1~3 次被改约的历史 */
+export const mockRescheduleNotifications = (customerIds: string[]): RescheduleNotification[] => {
+  const mkNotif = (
+    idx: string,
+    customerIdx: number,
+    daysAgo: number,
+    fromHour: number,
+    toHour: number,
+    count: number
+  ): RescheduleNotification => {
+    const from = dayjs().subtract(daysAgo, 'day').hour(fromHour).minute(0).second(0).millisecond(0);
+    const to = from.add(1, 'day').hour(toHour).minute(0);
+    return {
+      id: `RN${idx.padStart(6, '0')}`,
+      appointmentId: `AH${idx.padStart(6, '0')}`,
+      customerId: customerIds[customerIdx % customerIds.length],
+      fromTime: from.toISOString(),
+      toTime: to.toISOString(),
+      rescheduleCount: count,
+      reason: '美容师临时请假，为您协调其他时段',
+      createdAt: from.subtract(2, 'hour').toISOString(),
+      status: 'read',
+    };
+  };
+  return [
+    mkNotif('1', 0, 9, 10, 15, 1),
+    mkNotif('2', 0, 4, 14, 11, 2),
+    mkNotif('3', 0, 1, 16, 10, 3),
+    mkNotif('4', 7, 6, 11, 14, 1),
+    mkNotif('5', 7, 2, 19, 15, 2),
+    mkNotif('6', 21, 3, 10, 16, 1),
+  ];
 };

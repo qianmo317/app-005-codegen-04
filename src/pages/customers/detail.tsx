@@ -25,7 +25,8 @@ import {
   EditOutlined,
   DeleteOutlined,
   ClockCircleOutlined,
-  CheckCircleOutlined
+  CheckCircleOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
@@ -38,7 +39,7 @@ import {
   deleteAllergy
 } from '../../store';
 import type { SkinAnalysis, Allergy } from '../../types';
-import { formatDate, formatCurrency, generateId, getStatusText } from '../../utils/format';
+import { formatDate, formatDateTime, formatCurrency, generateId, getStatusText } from '../../utils/format';
 import dayjs from 'dayjs';
 
 const CustomerDetail: React.FC = () => {
@@ -64,6 +65,9 @@ const CustomerDetail: React.FC = () => {
   const appointments = state.appointments
     .filter((a) => a.customerId === id)
     .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  const rescheduleRecords = state.notifications
+    .filter((n) => n.customerId === id)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   if (!customer) {
     return <div className="empty-state">顾客不存在</div>;
@@ -460,7 +464,16 @@ const CustomerDetail: React.FC = () => {
           },
           {
             key: 'appointments',
-            label: '预约记录',
+            label: (
+              <span>
+                预约记录
+                {rescheduleRecords.length > 0 && (
+                  <Tag color="purple" style={{ marginLeft: 6 }}>
+                    被挪 {rescheduleRecords.length} 次
+                  </Tag>
+                )}
+              </span>
+            ),
             children: (
               <Card className="card-wrapper" title="预约记录">
                 {appointments.length > 0 ? (
@@ -469,6 +482,9 @@ const CustomerDetail: React.FC = () => {
                     renderItem={(item) => {
                       const service = state.services.find((s) => s.id === item.serviceId);
                       const employee = state.employees.find((e) => e.id === item.employeeId);
+                      const movedCount = state.notifications.filter(
+                        (n) => n.appointmentId === item.id
+                      ).length;
                       return (
                         <List.Item key={item.id}>
                           <List.Item.Meta
@@ -484,6 +500,7 @@ const CustomerDetail: React.FC = () => {
                                 }>
                                   {getStatusText(item.status)}
                                 </Tag>
+                                {movedCount > 0 && <Tag color="geekblue">本单挪过 {movedCount} 次</Tag>}
                               </Space>
                             }
                             description={`${formatDate(item.startTime, 'YYYY-MM-DD HH:mm')} · ${employee?.name || '未知'}`}
@@ -494,6 +511,56 @@ const CustomerDetail: React.FC = () => {
                   />
                 ) : (
                   <div className="empty-state">暂无预约记录</div>
+                )}
+              </Card>
+            ),
+          },
+          {
+            key: 'reschedules',
+            label: (
+              <span>
+                改约通知
+                {rescheduleRecords.length > 0 && (
+                  <Tag color="purple" style={{ marginLeft: 6 }}>{rescheduleRecords.length}</Tag>
+                )}
+              </span>
+            ),
+            children: (
+              <Card
+                className="card-wrapper"
+                title={
+                  <Space>
+                    <ReloadOutlined />
+                    <span>改约记录</span>
+                    <Tag color="purple">累计被挪动 {rescheduleRecords.length} 次</Tag>
+                  </Space>
+                }
+              >
+                {rescheduleRecords.length > 0 ? (
+                  rescheduleRecords.map((n, idx) => (
+                    <div key={n.id} className="timeline-item">
+                      <div className="timeline-item-date">{formatDateTime(n.createdAt)} 发送</div>
+                      <div className="timeline-item-content">
+                        <Space wrap>
+                          <Tag color="purple">第 {n.rescheduleCount} 次改约</Tag>
+                          <span>
+                            {formatDate(n.fromTime, 'MM/DD HH:mm')}
+                            <ArrowLeftOutlined style={{ margin: '0 6px', color: '#C9A86C' }} />
+                            {formatDate(n.toTime, 'MM/DD HH:mm')}
+                          </span>
+                          {n.status === 'sent' ? <Tag color="blue">已发送</Tag> : <Tag>已读</Tag>}
+                        </Space>
+                        <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>{n.reason}</div>
+                        {idx === 0 && (
+                          <div style={{ fontSize: 12, color: '#ff4d4f', marginTop: 4 }}>
+                            该顾客近期被多次改约，建议再次调整前优先电话沟通。
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state">该顾客暂无被挪动的记录</div>
                 )}
               </Card>
             ),

@@ -108,6 +108,52 @@ export interface WaitList {
   status: 'waiting' | 'notified' | 'cancelled' | 'booked';
 }
 
+/** 时段容量规则：按星期配置模板，每个营业小时一条 */
+export interface CapacityRule {
+  /** 0=周日 1=周一 ... 6=周六 */
+  weekday: number;
+  /** 时段起点，HH:mm */
+  startTime: string;
+  /** 时段终点，HH:mm */
+  endTime: string;
+  /** 该时段最多同时接几位客人 */
+  maxBookings: number;
+  /** 该时段需要几位美容师在岗 */
+  requiredStaff: number;
+}
+
+/** 美容师临时请假记录 */
+export interface LeaveRecord {
+  id: string;
+  employeeId: string;
+  date: string;
+  /** 请假起点，HH:mm（全天请假则为 00:00） */
+  startTime: string;
+  /** 请假终点，HH:mm（全天请假则为 23:59） */
+  endTime: string;
+  reason: string;
+  type: 'full_day' | 'partial';
+  createdAt: string;
+  /** 撤销请假后不再参与人手计算 */
+  cancelled: boolean;
+}
+
+/** 改约通知：预约被挪动时通知顾客，同一顾客的累计次数可由此统计 */
+export interface RescheduleNotification {
+  id: string;
+  appointmentId: string;
+  customerId: string;
+  /** 挪动前开始时间 ISO */
+  fromTime: string;
+  /** 挪动后开始时间 ISO */
+  toTime: string;
+  /** 该顾客第几次被改约（从 1 开始） */
+  rescheduleCount: number;
+  reason: string;
+  createdAt: string;
+  status: 'sent' | 'read';
+}
+
 export interface Employee {
   id: string;
   name: string;

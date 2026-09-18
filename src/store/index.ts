@@ -15,7 +15,10 @@ import type {
   Review,
   Attendance,
   Commission,
-  WaitList
+  WaitList,
+  CapacityRule,
+  LeaveRecord,
+  RescheduleNotification
 } from '../types';
 import {
   mockCustomers,
@@ -27,13 +30,28 @@ import {
   mockPackageItems,
   mockEmployees,
   mockAppointments,
+  mockFutureAppointments,
   mockServiceRecords,
   mockSchedules,
   mockReviews,
   mockAttendance,
   mockCommissions,
-  mockWaitList
+  mockWaitList,
+  mockCapacityRules,
+  mockLeaveRecords,
+  mockRescheduleNotifications,
+  mockDemoScheduleOverrides
 } from '../mock';
+
+/** 用演示排班覆盖随机排班中同一员工同一天的记录 */
+const applyScheduleOverrides = (schedules: import('../types').Schedule[]): import('../types').Schedule[] => {
+  const overrides = mockDemoScheduleOverrides();
+  const overrideKeys = new Set(overrides.map((o) => `${o.employeeId}@${o.date}`));
+  return [
+    ...schedules.filter((s) => !overrideKeys.has(`${s.employeeId}@${s.date}`)),
+    ...overrides,
+  ];
+};
 
 interface AppState {
   customers: Customer[];
@@ -51,32 +69,15 @@ interface AppState {
   attendance: Attendance[];
   commissions: Commission[];
   waitList: WaitList[];
+  capacityRules: CapacityRule[];
+  leaveRecords: LeaveRecord[];
+  notifications: RescheduleNotification[];
   initialized: boolean;
 }
 
 const STORAGE_KEY = 'app_state';
 
-const loadState = (): AppState => {
-  try {
-    const saved = storage.get<AppState>(STORAGE_KEY);
-    if (saved && saved.initialized) {
-      // Verify data integrity
-      const firstCustomer = saved.customers[0];
-      if (firstCustomer && firstCustomer.avatar && firstCustomer.avatar.includes('data:image/svg+xml;base64,')) {
-        const b64 = firstCustomer.avatar.replace('data:image/svg+xml;base64,', '');
-        try {
-          atob(b64);
-          return saved;
-        } catch (e) {
-          console.log('Detected corrupted data, regenerating...');
-          storage.clear();
-        }
-      }
-    }
-  } catch (e) {
-    console.log('Loading fresh data...');
-  }
-
+const createFreshState = (): AppState => {
   const customers = mockCustomers();
   const customerIds = customers.map(c => c.id);
   const services = mockServices() as Service[];
@@ -94,15 +95,65 @@ const loadState = (): AppState => {
     packages,
     packageItems: mockPackageItems(packages),
     employees,
-    appointments: mockAppointments(customerIds, serviceIds, employeeIds),
+    appointments: [
+      ...mockAppointments(customerIds, serviceIds, employeeIds),
+      ...mockFutureAppointments(customerIds, serviceIds, employeeIds)
+    ],
     serviceRecords: mockServiceRecords(customerIds, serviceIds, employeeIds),
-    schedules: mockSchedules(employeeIds),
+    schedules: applyScheduleOverrides(mockSchedules(employeeIds)),
     reviews: mockReviews(customerIds, employeeIds, serviceIds),
     attendance: mockAttendance(employeeIds),
     commissions: mockCommissions(employeeIds),
     waitList: mockWaitList(customerIds, serviceIds),
+    capacityRules: mockCapacityRules(),
+    leaveRecords: mockLeaveRecords(),
+    notifications: mockRescheduleNotifications(customerIds),
     initialized: true
   };
+};
+
+const loadState = (): AppState => {
+  try {
+    const saved = storage.get<AppState>(STORAGE_KEY);
+    if (saved && saved.initialized) {
+      // Verify data integrity
+      const firstCustomer = saved.customers[0];
+      if (firstCustomer && firstCustomer.avatar && firstCustomer.avatar.includes('data:image/svg+xml;base64,')) {
+        const b64 = firstCustomer.avatar.replace('data:image/svg+xml;base64,', '');
+        try {
+          atob(b64);
+          // 兼容旧版本缓存：补齐容量/请假/通知等新字段
+          if (!saved.capacityRules || !saved.leaveRecords || !saved.notifications) {
+            const fresh = createFreshState();
+            saved.capacityRules = saved.capacityRules || fresh.capacityRules;
+            saved.leaveRecords = saved.leaveRecords || fresh.leaveRecords;
+            saved.notifications = saved.notifications || fresh.notifications;
+            saved.schedules = applyScheduleOverrides(saved.schedules);
+            // 旧缓存里没有"未来演示预约"，补上便于演示对账挪单
+            const hasFutureDemo = saved.appointments.some(a => a.id.startsWith('AF'));
+            if (!hasFutureDemo) {
+              const customerIds = saved.customers.map(c => c.id);
+              const serviceIds = saved.services.map(s => s.id);
+              const employeeIds = saved.employees.map(e => e.id);
+              saved.appointments = [
+                ...saved.appointments,
+                ...mockFutureAppointments(customerIds, serviceIds, employeeIds)
+              ];
+            }
+            saveState(saved);
+          }
+          return saved;
+        } catch (e) {
+          console.log('Detected corrupted data, regenerating...');
+          storage.clear();
+        }
+      }
+    }
+  } catch (e) {
+    console.log('Loading fresh data...');
+  }
+
+  return createFreshState();
 };
 
 const initialState: AppState = loadState();
@@ -237,6 +288,56 @@ const appSlice = createSlice({
         else if (membership.totalSpent > 5000) membership.level = 'silver';
       }
       saveState(state);
+    },
+    saveCapacityRules: (state, action: PayloadAction<CapacityRule[]>) => {
+      action.payload.forEach(rule => {
+        const index = state.capacityRules.findIndex(
+          r => r.weekday === rule.weekday && r.startTime === rule.startTime
+        );
+        if (index !== -1) {
+          state.capacityRules[index] = rule;
+        } else {
+          state.capacityRules.push(rule);
+        }
+      });
+      saveState(state);
+    },
+    addLeaveRecord: (state, action: PayloadAction<LeaveRecord>) => {
+      state.leaveRecords.unshift(action.payload);
+      saveState(state);
+    },
+    cancelLeaveRecord: (state, action: PayloadAction<string>) => {
+      const leave = state.leaveRecords.find(l => l.id === action.payload);
+      if (leave) {
+        leave.cancelled = true;
+        saveState(state);
+      }
+    },
+    /**
+     * 挪单：更新预约时间/美容师，并生成改约通知。
+     * 挪过之后的时段占用由容量计算引擎按最新数据重新计算。
+     */
+    rescheduleAppointment: (
+      state,
+      action: PayloadAction<{
+        appointment: Appointment;
+        notification: RescheduleNotification;
+      }>
+    ) => {
+      const { appointment, notification } = action.payload;
+      const index = state.appointments.findIndex(a => a.id === appointment.id);
+      if (index !== -1) {
+        state.appointments[index] = appointment;
+      }
+      state.notifications.unshift(notification);
+      saveState(state);
+    },
+    markNotificationRead: (state, action: PayloadAction<string>) => {
+      const n = state.notifications.find(item => item.id === action.payload);
+      if (n) {
+        n.status = 'read';
+        saveState(state);
+      }
     }
   }
 });
@@ -263,7 +364,12 @@ export const {
   addWaitList,
   updateWaitList,
   deleteWaitList,
-  addServiceRecord
+  addServiceRecord,
+  saveCapacityRules,
+  addLeaveRecord,
+  cancelLeaveRecord,
+  rescheduleAppointment,
+  markNotificationRead
 } = appSlice.actions;
 
 export const store = configureStore({
